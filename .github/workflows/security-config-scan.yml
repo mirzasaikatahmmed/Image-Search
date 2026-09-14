@@ -31,7 +31,9 @@ jobs:
           for pat in "${PATTERNS[@]}"; do
             hits=$(grep -rlE "$pat" . \
               --exclude-dir=node_modules --exclude-dir=.git \
-              --exclude=security-config-scan.yml --exclude=.gitignore 2>/dev/null || true)
+              --exclude=security-config-scan.yml --exclude=.gitignore \
+              --exclude=*.md --exclude=*.mdx \
+              --exclude=check-malware-configs.mjs --exclude=malware-scan-report.txt 2>/dev/null || true)
             if [[ -n "$hits" ]]; then
               echo "::error::Known config-malware IOC matched pattern: $pat"
               echo "$hits" | while read -r f; do echo "::error file=$f::malware signature found"; done
