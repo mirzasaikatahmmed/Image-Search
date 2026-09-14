@@ -1,0 +1,65 @@
+name: Security Config Scan
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  config-malware-scan:
+    name: Scan for config-file malware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for known config-malware IOCs
+        run: |
+          set -uo pipefail
+          FOUND=0
+
+          # Known campaign IOCs (config-malware worm + DPRK tailwind.config implant)
+          PATTERNS=(
+            "global\['!'\]='[0-9-]+'"
+            "jFD\(LQI,pYd"
+            "global\.i *= *['\"]A8-"
+            "global\._t_t"
+            "global\._R\(\)"
+            "0xa322E5f3D311D3080e6f0121063e9aDC2490Ef1a"
+            "temp_auto_push\.bat"
+            "temp_interactive_push\.bat"
+          )
+
+          for pat in "${PATTERNS[@]}"; do
+            hits=$(grep -rlE "$pat" . \
+              --exclude-dir=node_modules --exclude-dir=.git 2>/dev/null || true)
+            if [[ -n "$hits" ]]; then
+              echo "::error::Known config-malware IOC matched pattern: $pat"
+              echo "$hits" | while read -r f; do echo "::error file=$f::malware signature found"; done
+              FOUND=1
+            fi
+          done
+
+          # font/asset files that are actually JS text (the dropper disguise trick)
+          while IFS= read -r -d '' f; do
+            ftype=$(file -b "$f" 2>/dev/null)
+            if [[ "$ftype" == *"JavaScript"* || "$ftype" == *"ASCII text"* ]]; then
+              echo "::error file=$f::font/asset file is actually text/JS, not a real font ($ftype)"
+              FOUND=1
+            fi
+          done < <(find . -type f \( -iname "*.woff2" -o -iname "*.woff" -o -iname "*.ttf" -o -iname "*.eot" \) \
+            -not -path "*/node_modules/*" -not -path "*/.git/*" -print0 2>/dev/null)
+
+          # .vscode auto-run tasks (runOn: folderOpen is the exact trigger used by this campaign)
+          while IFS= read -r -d '' f; do
+            if grep -q "folderOpen" "$f" 2>/dev/null; then
+              echo "::error file=$f::.vscode task set to auto-run on folderOpen - review manually"
+              FOUND=1
+            fi
+          done < <(find . -path "*/.vscode/tasks.json" -not -path "*/node_modules/*" -print0 2>/dev/null)
+
+          if [[ "$FOUND" -eq 1 ]]; then
+            echo ""
+            echo "Config-malware scan FAILED. Do not merge until this is resolved."
+            exit 1
+          fi
+
+          echo "Config-malware scan passed - no known IOCs found."
